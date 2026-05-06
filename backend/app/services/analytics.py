@@ -31,11 +31,11 @@ def prepare_price_frame(prices: pd.DataFrame) -> pd.DataFrame:
         raise AnalyticsError(f"Missing required price columns: {sorted(missing)}")
 
     frame = prices.copy()
-    frame["price_date"] = pd.to_datetime(frame["price_date"])
+    frame["price_date"] = pd.to_datetime(frame["price_date"], errors="coerce")
     frame = frame.sort_values("price_date")
     frame["close"] = pd.to_numeric(frame["close"], errors="coerce")
     frame["volume"] = pd.to_numeric(frame["volume"], errors="coerce")
-    frame = frame.dropna(subset=["close", "volume"])
+    frame = frame.dropna(subset=["price_date", "close", "volume"])
     frame = frame[(frame["close"] > 0) & (frame["volume"] >= 0)]
     if frame.empty:
         raise AnalyticsError("No valid price rows available for metric computation")

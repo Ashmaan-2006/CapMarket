@@ -110,7 +110,7 @@ def test_metrics_endpoint_returns_history_payload(monkeypatch) -> None:
     body = response.json()
     assert body["symbol"] == "AAPL"
     assert body["total"] == 1
-    assert body["items"][0]["daily_return"] == "0.01000000"
+    assert body["items"][0]["daily_return"] == "0.01"
 
 
 def test_top_movers_endpoint_returns_envelope(monkeypatch) -> None:

@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pandas as pd
 import pytest
@@ -87,8 +88,8 @@ def test_compute_metrics_calculates_return_windows() -> None:
 
     metrics = compute_metrics(prices)
 
-    assert metrics.iloc[1]["daily_return"] == pytest.approx(0.02)
-    assert metrics.iloc[5]["weekly_return"] == pytest.approx(0.10)
+    assert metrics.iloc[1]["daily_return"] == Decimal("0.02")
+    assert metrics.iloc[5]["weekly_return"] == Decimal("0.1")
 
 
 def test_compute_metrics_tracks_drawdown_and_recovery() -> None:
@@ -96,9 +97,9 @@ def test_compute_metrics_tracks_drawdown_and_recovery() -> None:
 
     metrics = compute_metrics(prices)
 
-    assert metrics.iloc[2]["drawdown"] == pytest.approx(-0.25)
+    assert metrics.iloc[2]["drawdown"] == Decimal("-0.25")
     assert metrics.iloc[4]["drawdown"] == 0
-    assert metrics.iloc[4]["max_drawdown_to_date"] == pytest.approx(-0.25)
+    assert metrics.iloc[4]["max_drawdown_to_date"] == Decimal("-0.25")
 
 
 def test_compute_metrics_calculates_volume_ratio() -> None:
@@ -109,7 +110,7 @@ def test_compute_metrics_calculates_volume_ratio() -> None:
 
     metrics = compute_metrics(prices)
 
-    assert metrics.iloc[-1]["volume_ratio_20d"] == pytest.approx(200 / 105)
+    assert metrics.iloc[-1]["volume_ratio_20d"] == Decimal("1.9047619")
 
 
 def test_rank_top_movers_ignores_null_returns() -> None:

@@ -2,7 +2,7 @@
 name = "capital-markets-ai-reporting-backend"
 version = "0.1.0"
 description = "FastAPI backend for market data ETL, analytics, and AI reports"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.13.0",
   "fastapi>=0.115.0",
@@ -21,6 +21,10 @@ dependencies = [
 requires = ["setuptools>=69.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["migrations*", "tests*"]
+
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0.0",
@@ -30,7 +34,7 @@ dev = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py311"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
