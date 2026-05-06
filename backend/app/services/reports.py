@@ -1,6 +1,6 @@
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import Any, Protocol
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
@@ -16,6 +16,16 @@ class AnalystReportOutput(BaseModel):
     trend_insights: list[str]
     anomaly_explanations: list[str]
     risk_notes: list[str]
+
+
+class ReportProviderResult(BaseModel):
+    output: AnalystReportOutput
+    model: str
+
+
+class ReportProvider(Protocol):
+    def generate(self, snapshot: "ReportMetricSnapshot") -> ReportProviderResult:
+        pass
 
 
 class ReportMetricSnapshot(BaseModel):
@@ -36,6 +46,63 @@ class ReportMetricSnapshot(BaseModel):
 
     def to_prompt_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json")
+
+
+REPORT_SYSTEM_PROMPT = (
+    "You are a capital markets analyst. Generate concise reporting from the provided "
+    "structured metrics only. Do not invent news, catalysts, prices, or facts outside "
+    "the input. Explain anomalies using metric evidence."
+)
+
+
+class LocalFallbackReportProvider:
+    model = "local-fallback"
+
+    def generate(self, snapshot: ReportMetricSnapshot) -> ReportProviderResult:
+        output = AnalystReportOutput(
+            summary=(
+                f"{snapshot.symbol} report generated from stored metrics for "
+                f"{snapshot.report_date.isoformat()}."
+            ),
+            trend_insights=["AI provider is not configured; metrics snapshot is available for review."],
+            anomaly_explanations=[
+                f"Detected signal: {signal.replace('_', ' ')}" for signal in snapshot.signals
+            ],
+            risk_notes=["Set OPENAI_API_KEY to enable analyst-style report generation."],
+        )
+        return ReportProviderResult(output=output, model=self.model)
+
+
+class OpenAiReportProvider:
+    def __init__(self, api_key: str, model: str) -> None:
+        self.client = OpenAI(api_key=api_key)
+        self.model = model
+
+    def generate(self, snapshot: ReportMetricSnapshot) -> ReportProviderResult:
+        completion = self.client.beta.chat.completions.parse(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": REPORT_SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": f"Structured metrics snapshot: {snapshot.to_prompt_payload()}",
+                },
+            ],
+            response_format=AnalystReportOutput,
+        )
+        output = completion.choices[0].message.parsed
+        if output is None:
+            raise ValueError("AI provider returned an empty report")
+        return ReportProviderResult(output=output, model=self.model)
+
+
+def get_report_provider(settings: Settings) -> ReportProvider:
+    if settings.openai_api_key:
+        return OpenAiReportProvider(api_key=settings.openai_api_key, model=settings.openai_model)
+    return LocalFallbackReportProvider()
 
 
 def _decimal_to_float(value: Decimal | None) -> float | None:
@@ -100,39 +167,8 @@ def generate_report(db: Session, settings: Settings, symbol: str, report_date: d
     snapshot = build_metrics_snapshot(db, symbol, report_date)
     ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one()
     prompt_payload = snapshot.to_prompt_payload()
-
-    if not settings.openai_api_key:
-        output = AnalystReportOutput(
-            summary=f"{ticker.symbol} report generated from stored metrics for {snapshot.report_date.isoformat()}.",
-            trend_insights=["AI provider is not configured; metrics snapshot is available for review."],
-            anomaly_explanations=[],
-            risk_notes=["Set OPENAI_API_KEY to enable analyst-style report generation."],
-        )
-        model = "local-fallback"
-    else:
-        client = OpenAI(api_key=settings.openai_api_key)
-        completion = client.beta.chat.completions.parse(
-            model=settings.openai_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a capital markets analyst. Generate concise reporting from the "
-                        "provided structured metrics only. Do not invent news, catalysts, prices, "
-                        "or facts outside the input. Explain anomalies using metric evidence."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": f"Structured metrics snapshot: {prompt_payload}",
-                },
-            ],
-            response_format=AnalystReportOutput,
-        )
-        output = completion.choices[0].message.parsed
-        if output is None:
-            raise ValueError("AI provider returned an empty report")
-        model = settings.openai_model
+    provider_result = get_report_provider(settings).generate(snapshot)
+    output = provider_result.output
 
     report = AiReport(
         ticker_id=ticker.id,
@@ -143,7 +179,7 @@ def generate_report(db: Session, settings: Settings, symbol: str, report_date: d
         anomaly_explanations=output.anomaly_explanations,
         risk_notes=output.risk_notes,
         metrics_snapshot=prompt_payload,
-        model=model,
+        model=provider_result.model,
     )
     db.add(report)
     db.commit()

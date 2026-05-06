@@ -1,6 +1,13 @@
 from datetime import date
 
-from app.services.reports import ReportMetricSnapshot, _build_signals
+from app.core.config import Settings
+from app.services.reports import (
+    LocalFallbackReportProvider,
+    OpenAiReportProvider,
+    ReportMetricSnapshot,
+    _build_signals,
+    get_report_provider,
+)
 
 
 def test_report_metric_snapshot_serializes_for_prompt() -> None:
@@ -51,3 +58,36 @@ def test_build_signals_flags_metric_anomalies() -> None:
     assert "unusually_high_volume" in signals
     assert "material_drawdown" in signals
     assert "price_above_20d_sma" in signals
+
+
+def test_local_fallback_provider_uses_snapshot_signals() -> None:
+    snapshot = ReportMetricSnapshot(
+        symbol="AAPL",
+        report_date=date(2024, 1, 2),
+        latest_price=190.5,
+        volume=10_000_000,
+        daily_return=0.04,
+        weekly_return=0.08,
+        monthly_return=0.12,
+        volatility_20d=0.025,
+        sma_20=180.0,
+        sma_50=170.0,
+        ema_20=181.0,
+        drawdown=-0.02,
+        volume_ratio_20d=2.4,
+        signals=["large_positive_daily_return"],
+    )
+
+    result = LocalFallbackReportProvider().generate(snapshot)
+
+    assert result.model == "local-fallback"
+    assert "AAPL" in result.output.summary
+    assert result.output.anomaly_explanations == ["Detected signal: large positive daily return"]
+
+
+def test_get_report_provider_selects_configured_provider() -> None:
+    fallback = get_report_provider(Settings(openai_api_key=None))
+    configured = get_report_provider(Settings(openai_api_key="test-key"))
+
+    assert isinstance(fallback, LocalFallbackReportProvider)
+    assert isinstance(configured, OpenAiReportProvider)
