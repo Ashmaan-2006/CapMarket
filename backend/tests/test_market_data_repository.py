@@ -1,8 +1,9 @@
 from datetime import date
 
 import pandas as pd
+import pytest
 
-from app.repositories.market_data import _decimal
+from app.repositories.market_data import _decimal, upsert_computed_metrics
 
 
 def test_decimal_handles_missing_pandas_values() -> None:
@@ -32,3 +33,8 @@ def test_repository_price_rows_preserve_expected_columns() -> None:
     assert row.price_date == date(2024, 1, 2)
     assert row.symbol == "AAPL"
     assert row.source == "stooq"
+
+
+def test_upsert_computed_metrics_validates_required_columns() -> None:
+    with pytest.raises(ValueError):
+        upsert_computed_metrics(db=None, ticker=None, metrics=pd.DataFrame({"metric_date": [date(2024, 1, 2)]}))

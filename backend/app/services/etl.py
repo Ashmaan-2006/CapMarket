@@ -2,14 +2,12 @@ import logging
 from datetime import UTC, date, datetime
 from typing import Any
 
-import pandas as pd
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import ComputedMetric, EtlJob, EtlStatus, Ticker
-from app.repositories.market_data import load_ticker_prices
+from app.models import EtlJob, EtlStatus
+from app.repositories.market_data import load_ticker_prices, upsert_computed_metrics
 from app.services.analytics import compute_metrics
 from app.services.market_data import MarketDataRequest, get_market_data_provider
 from app.services.transforms import clean_price_history
@@ -28,6 +26,7 @@ def _job_metadata(
     end_date: date | None,
     completed_symbols: list[str] | None = None,
     failed_symbols: dict[str, str] | None = None,
+    metric_rows_loaded: int = 0,
 ) -> dict[str, Any]:
     return {
         "provider": provider_name,
@@ -35,6 +34,7 @@ def _job_metadata(
         "end_date": end_date.isoformat() if end_date else None,
         "completed_symbols": completed_symbols or [],
         "failed_symbols": failed_symbols or {},
+        "metric_rows_loaded": metric_rows_loaded,
     }
 
 
@@ -71,6 +71,7 @@ def _update_job_progress(
     rows_loaded: int,
     completed_symbols: list[str],
     failed_symbols: dict[str, str],
+    metric_rows_loaded: int,
     provider_name: str,
     start_date: date | None,
     end_date: date | None,
@@ -83,6 +84,7 @@ def _update_job_progress(
         end_date=end_date,
         completed_symbols=completed_symbols,
         failed_symbols=failed_symbols,
+        metric_rows_loaded=metric_rows_loaded,
     )
     db.commit()
 
@@ -109,6 +111,7 @@ def _mark_job_failed(
     end_date: date | None,
     completed_symbols: list[str],
     failed_symbols: dict[str, str],
+    metric_rows_loaded: int,
 ) -> EtlJob:
     persisted_job = db.execute(select(EtlJob).where(EtlJob.id == job_id)).scalar_one()
     persisted_job.status = EtlStatus.FAILED.value
@@ -122,64 +125,11 @@ def _mark_job_failed(
         end_date=end_date,
         completed_symbols=completed_symbols,
         failed_symbols=failed_symbols,
+        metric_rows_loaded=metric_rows_loaded,
     )
     db.commit()
     db.refresh(persisted_job)
     return persisted_job
-
-
-def _upsert_metrics(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
-    metrics = compute_metrics(prices)
-    persistable_columns = [
-        "metric_date",
-        "daily_return",
-        "weekly_return",
-        "monthly_return",
-        "volatility_20d",
-        "sma_20",
-        "sma_50",
-        "ema_20",
-        "drawdown",
-        "volume_ratio_20d",
-    ]
-    rows = [
-        {
-            "ticker_id": ticker.id,
-            "metric_date": row.metric_date,
-            "daily_return": row.daily_return,
-            "weekly_return": row.weekly_return,
-            "monthly_return": row.monthly_return,
-            "volatility_20d": row.volatility_20d,
-            "sma_20": row.sma_20,
-            "sma_50": row.sma_50,
-            "ema_20": row.ema_20,
-            "drawdown": row.drawdown,
-            "volume_ratio_20d": row.volume_ratio_20d,
-        }
-        for row in metrics[persistable_columns].itertuples(index=False)
-    ]
-    if not rows:
-        return 0
-
-    stmt = insert(ComputedMetric).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_metric_ticker_date",
-        set_={
-            "daily_return": stmt.excluded.daily_return,
-            "weekly_return": stmt.excluded.weekly_return,
-            "monthly_return": stmt.excluded.monthly_return,
-            "volatility_20d": stmt.excluded.volatility_20d,
-            "sma_20": stmt.excluded.sma_20,
-            "sma_50": stmt.excluded.sma_50,
-            "ema_20": stmt.excluded.ema_20,
-            "drawdown": stmt.excluded.drawdown,
-            "volume_ratio_20d": stmt.excluded.volume_ratio_20d,
-            "updated_at": _utc_now(),
-        },
-    )
-    db.execute(stmt)
-    return len(rows)
-
 
 async def run_market_data_etl(
     db: Session,
@@ -203,6 +153,7 @@ async def run_market_data_etl(
     )
     rows_extracted = 0
     rows_loaded = 0
+    metric_rows_loaded = 0
     completed_symbols: list[str] = []
     failed_symbols: dict[str, str] = {}
 
@@ -215,10 +166,12 @@ async def run_market_data_etl(
                 )
                 raw_prices = result.rows
                 prices = clean_price_history(raw_prices)
+                metrics = compute_metrics(prices)
                 rows_extracted += len(prices)
                 load_result = load_ticker_prices(db, symbol, prices)
                 rows_loaded += load_result.rows_submitted
-                _upsert_metrics(db, load_result.ticker, prices)
+                metric_load_result = upsert_computed_metrics(db, load_result.ticker, metrics)
+                metric_rows_loaded += metric_load_result.rows_submitted
                 completed_symbols.append(symbol)
                 _update_job_progress(
                     db,
@@ -227,6 +180,7 @@ async def run_market_data_etl(
                     rows_loaded=rows_loaded,
                     completed_symbols=completed_symbols,
                     failed_symbols=failed_symbols,
+                    metric_rows_loaded=metric_rows_loaded,
                     provider_name=provider.source,
                     start_date=start_date,
                     end_date=end_date,
@@ -252,4 +206,5 @@ async def run_market_data_etl(
             end_date=end_date,
             completed_symbols=completed_symbols,
             failed_symbols=failed_symbols,
+            metric_rows_loaded=metric_rows_loaded,
         )

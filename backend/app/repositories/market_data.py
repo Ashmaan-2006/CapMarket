@@ -6,11 +6,17 @@ import pandas as pd
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import HistoricalPrice, Ticker
+from app.models import ComputedMetric, HistoricalPrice, Ticker
 
 
 @dataclass(frozen=True)
 class PriceLoadResult:
+    ticker: Ticker
+    rows_submitted: int
+
+
+@dataclass(frozen=True)
+class MetricLoadResult:
     ticker: Ticker
     rows_submitted: int
 
@@ -81,3 +87,59 @@ def upsert_historical_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) 
 def load_ticker_prices(db: Session, symbol: str, prices: pd.DataFrame) -> PriceLoadResult:
     ticker = upsert_ticker(db, symbol)
     return upsert_historical_prices(db, ticker, prices)
+
+
+def upsert_computed_metrics(db: Session, ticker: Ticker, metrics: pd.DataFrame) -> MetricLoadResult:
+    persistable_columns = [
+        "metric_date",
+        "daily_return",
+        "weekly_return",
+        "monthly_return",
+        "volatility_20d",
+        "sma_20",
+        "sma_50",
+        "ema_20",
+        "drawdown",
+        "volume_ratio_20d",
+    ]
+    missing = set(persistable_columns).difference(metrics.columns)
+    if missing:
+        raise ValueError(f"Missing computed metric columns: {sorted(missing)}")
+
+    rows = [
+        {
+            "ticker_id": ticker.id,
+            "metric_date": row.metric_date,
+            "daily_return": row.daily_return,
+            "weekly_return": row.weekly_return,
+            "monthly_return": row.monthly_return,
+            "volatility_20d": row.volatility_20d,
+            "sma_20": row.sma_20,
+            "sma_50": row.sma_50,
+            "ema_20": row.ema_20,
+            "drawdown": row.drawdown,
+            "volume_ratio_20d": row.volume_ratio_20d,
+        }
+        for row in metrics[persistable_columns].itertuples(index=False)
+    ]
+    if not rows:
+        return MetricLoadResult(ticker=ticker, rows_submitted=0)
+
+    stmt = insert(ComputedMetric).values(rows)
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_metric_ticker_date",
+        set_={
+            "daily_return": stmt.excluded.daily_return,
+            "weekly_return": stmt.excluded.weekly_return,
+            "monthly_return": stmt.excluded.monthly_return,
+            "volatility_20d": stmt.excluded.volatility_20d,
+            "sma_20": stmt.excluded.sma_20,
+            "sma_50": stmt.excluded.sma_50,
+            "ema_20": stmt.excluded.ema_20,
+            "drawdown": stmt.excluded.drawdown,
+            "volume_ratio_20d": stmt.excluded.volume_ratio_20d,
+            "updated_at": _utc_now(),
+        },
+    )
+    db.execute(stmt)
+    return MetricLoadResult(ticker=ticker, rows_submitted=len(rows))
