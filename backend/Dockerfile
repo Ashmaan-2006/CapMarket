@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 WORKDIR /app
 
@@ -7,7 +7,12 @@ ENV PYTHONUNBUFFERED=1
 
 RUN pip install --no-cache-dir --upgrade pip
 
-COPY . .
+COPY pyproject.toml ./
+COPY alembic.ini ./
+COPY app ./app
+COPY migrations ./migrations
 RUN pip install --no-cache-dir -e .
+
+EXPOSE 8000
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

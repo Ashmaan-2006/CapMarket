@@ -42,8 +42,7 @@ services:
       - ./frontend:/app
       - /app/node_modules
       - /app/.next
-    command: npm run dev -- --hostname 0.0.0.0
+    command: npm run dev -- --hostname 0.0.0.0 --port 3000
 
 volumes:
   postgres_data:
-

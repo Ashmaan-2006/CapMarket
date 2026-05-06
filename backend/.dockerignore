@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+.venv/
+capital_markets_ai_reporting_backend.egg-info/
