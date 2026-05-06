@@ -136,3 +136,11 @@ Important values:
 ## Database Design
 
 See [docs/architecture.md](docs/architecture.md) for the schema, relationships, indexes, and performance notes.
+
+## Quality Gates
+
+CI runs on pushes and pull requests to validate the production-critical paths:
+
+- backend install, Ruff linting, and pytest
+- frontend dependency install and TypeScript typecheck
+- Docker Compose configuration parsing
