@@ -6,22 +6,34 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db import get_db
+from app.errors import not_found, service_unavailable, validation_failed
 from app.models import AiReport, ComputedMetric, EtlJob, HistoricalPrice, Ticker
 from app.schemas import (
     AiReportRead,
+    MarketDataRead,
     EtlJobRead,
     EtlRunRequest,
     HealthRead,
     MetricRead,
+    MetricsRead,
     PriceRead,
     ReportGenerateRequest,
     TickerRead,
+    TickerListRead,
     TopMoverRead,
+    normalize_symbol,
 )
 from app.services.etl import run_market_data_etl
 from app.services.reports import generate_report
 
 router = APIRouter()
+
+
+def _normalize_symbol_param(value: str) -> str:
+    try:
+        return normalize_symbol(value)
+    except ValueError as exc:
+        raise validation_failed(str(exc)) from exc
 
 
 @router.get("/health", response_model=HealthRead)
@@ -37,24 +49,37 @@ def readiness(
     try:
         db.execute(text("SELECT 1"))
     except Exception as exc:
-        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+        raise service_unavailable("Database is not ready") from exc
     return HealthRead(status="ready", environment=settings.app_env)
 
 
-@router.get("/tickers", response_model=list[TickerRead])
+@router.get("/tickers", response_model=TickerListRead)
 def list_tickers(
     db: Session = Depends(get_db),
     search: str | None = None,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-) -> list[Ticker]:
+) -> TickerListRead:
     query = select(Ticker).order_by(Ticker.symbol).limit(limit).offset(offset)
     if search:
-        query = select(Ticker).where(Ticker.symbol.ilike(f"%{search.upper()}%")).order_by(Ticker.symbol).limit(limit).offset(offset)
-    return list(db.execute(query).scalars())
+        normalized_search = _normalize_symbol_param(search)
+        query = (
+            select(Ticker)
+            .where(Ticker.symbol.ilike(f"%{normalized_search}%"))
+            .order_by(Ticker.symbol)
+            .limit(limit)
+            .offset(offset)
+        )
+    items = list(db.execute(query).scalars())
+    return TickerListRead(
+        items=[TickerRead.model_validate(item) for item in items],
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
 
 
-@router.get("/market-data/{symbol}", response_model=list[PriceRead])
+@router.get("/market-data/{symbol}", response_model=MarketDataRead)
 def get_market_data(
     symbol: str,
     db: Session = Depends(get_db),
@@ -62,10 +87,14 @@ def get_market_data(
     end_date: date | None = None,
     limit: int = Query(default=252, ge=1, le=1500),
     offset: int = Query(default=0, ge=0),
-) -> list[HistoricalPrice]:
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one_or_none()
+) -> MarketDataRead:
+    normalized_symbol = _normalize_symbol_param(symbol)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be before or equal to end_date")
+
+    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
     if ticker is None:
-        raise HTTPException(status_code=404, detail="Ticker not found")
+        raise not_found("Ticker", normalized_symbol)
 
     query = select(HistoricalPrice).where(HistoricalPrice.ticker_id == ticker.id)
     if start_date:
@@ -73,19 +102,29 @@ def get_market_data(
     if end_date:
         query = query.where(HistoricalPrice.price_date <= end_date)
     query = query.order_by(HistoricalPrice.price_date).limit(limit).offset(offset)
-    return list(db.execute(query).scalars())
+    items = list(db.execute(query).scalars())
+    return MarketDataRead(
+        symbol=normalized_symbol,
+        start_date=start_date,
+        end_date=end_date,
+        items=[PriceRead.model_validate(item) for item in items],
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
 
 
-@router.get("/metrics/{symbol}", response_model=list[MetricRead])
+@router.get("/metrics/{symbol}", response_model=MetricsRead)
 def get_metrics(
     symbol: str,
     db: Session = Depends(get_db),
     limit: int = Query(default=252, ge=1, le=1500),
     offset: int = Query(default=0, ge=0),
-) -> list[ComputedMetric]:
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one_or_none()
+) -> MetricsRead:
+    normalized_symbol = _normalize_symbol_param(symbol)
+    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
     if ticker is None:
-        raise HTTPException(status_code=404, detail="Ticker not found")
+        raise not_found("Ticker", normalized_symbol)
 
     query = (
         select(ComputedMetric)
@@ -94,7 +133,14 @@ def get_metrics(
         .limit(limit)
         .offset(offset)
     )
-    return list(db.execute(query).scalars())
+    items = list(db.execute(query).scalars())
+    return MetricsRead(
+        symbol=normalized_symbol,
+        items=[MetricRead.model_validate(item) for item in items],
+        limit=limit,
+        offset=offset,
+        count=len(items),
+    )
 
 
 @router.get("/top-movers", response_model=list[TopMoverRead])
@@ -139,9 +185,10 @@ def get_etl_status(
 
 @router.get("/reports/{symbol}", response_model=list[AiReportRead])
 def get_reports(symbol: str, db: Session = Depends(get_db), limit: int = Query(default=10, ge=1, le=50)) -> list[AiReportRead]:
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one_or_none()
+    normalized_symbol = _normalize_symbol_param(symbol)
+    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
     if ticker is None:
-        raise HTTPException(status_code=404, detail="Ticker not found")
+        raise not_found("Ticker", normalized_symbol)
 
     reports = db.execute(
         select(AiReport).where(AiReport.ticker_id == ticker.id).order_by(desc(AiReport.created_at)).limit(limit)
@@ -171,9 +218,9 @@ def create_report(
     settings: Settings = Depends(get_settings),
 ) -> AiReportRead:
     try:
-        report = generate_report(db, settings, payload.symbol.upper(), payload.report_date, payload.report_type)
+        report = generate_report(db, settings, payload.symbol, payload.report_date, payload.report_type)
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise not_found("Report input", str(exc)) from exc
 
     ticker = db.get(Ticker, report.ticker_id)
     return AiReportRead(

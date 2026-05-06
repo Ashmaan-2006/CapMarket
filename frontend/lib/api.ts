@@ -59,6 +59,19 @@ export type AiReport = {
   created_at: string;
 };
 
+type PaginatedResponse<T> = {
+  items: T[];
+  limit: number;
+  offset: number;
+  count: number;
+};
+
+type SymbolSeriesResponse<T> = PaginatedResponse<T> & {
+  symbol: string;
+  start_date?: string | null;
+  end_date?: string | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -76,9 +89,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  tickers: () => request<Ticker[]>("/tickers"),
-  prices: (symbol: string) => request<PricePoint[]>(`/market-data/${symbol}?limit=252`),
-  metrics: (symbol: string) => request<MetricPoint[]>(`/metrics/${symbol}?limit=252`),
+  tickers: async () => {
+    const response = await request<PaginatedResponse<Ticker>>("/tickers");
+    return response.items;
+  },
+  prices: async (symbol: string) => {
+    const response = await request<SymbolSeriesResponse<PricePoint>>(
+      `/market-data/${symbol}?limit=252`
+    );
+    return response.items;
+  },
+  metrics: async (symbol: string) => {
+    const response = await request<SymbolSeriesResponse<MetricPoint>>(
+      `/metrics/${symbol}?limit=252`
+    );
+    return response.items;
+  },
   etlStatus: () => request<EtlJob[]>("/etl/status"),
   runEtl: (symbols: string[]) =>
     request<EtlJob>("/etl/run", { method: "POST", body: JSON.stringify({ symbols }) }),
@@ -89,4 +115,3 @@ export const api = {
       body: JSON.stringify({ symbol, report_type: "daily" })
     })
 };
-
