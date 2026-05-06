@@ -130,6 +130,18 @@ def _mark_job_failed(
 
 def _upsert_metrics(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
     metrics = compute_metrics(prices)
+    persistable_columns = [
+        "metric_date",
+        "daily_return",
+        "weekly_return",
+        "monthly_return",
+        "volatility_20d",
+        "sma_20",
+        "sma_50",
+        "ema_20",
+        "drawdown",
+        "volume_ratio_20d",
+    ]
     rows = [
         {
             "ticker_id": ticker.id,
@@ -144,7 +156,7 @@ def _upsert_metrics(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
             "drawdown": row.drawdown,
             "volume_ratio_20d": row.volume_ratio_20d,
         }
-        for row in metrics.itertuples(index=False)
+        for row in metrics[persistable_columns].itertuples(index=False)
     ]
     if not rows:
         return 0
