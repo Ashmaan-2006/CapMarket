@@ -9,6 +9,7 @@ from app.db import get_db
 from app.errors import not_found, service_unavailable, validation_failed
 from app.models import AiReport, ComputedMetric, EtlJob, Ticker
 from app.repositories.market_data import (
+    list_computed_metrics,
     list_historical_prices,
     list_tickers as list_ticker_records,
 )
@@ -126,28 +127,35 @@ def get_market_data(
 def get_metrics(
     symbol: str,
     db: Session = Depends(get_db),
+    start_date: date | None = None,
+    end_date: date | None = None,
     limit: int = Query(default=252, ge=1, le=1500),
     offset: int = Query(default=0, ge=0),
 ) -> MetricsRead:
     normalized_symbol = _normalize_symbol_param(symbol)
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
-    if ticker is None:
-        raise not_found("Ticker", normalized_symbol)
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be before or equal to end_date")
 
-    query = (
-        select(ComputedMetric)
-        .where(ComputedMetric.ticker_id == ticker.id)
-        .order_by(ComputedMetric.metric_date)
-        .limit(limit)
-        .offset(offset)
-    )
-    items = list(db.execute(query).scalars())
-    return MetricsRead(
+    result = list_computed_metrics(
+        db,
         symbol=normalized_symbol,
-        items=[MetricRead.model_validate(item) for item in items],
+        start_date=start_date,
+        end_date=end_date,
         limit=limit,
         offset=offset,
-        count=len(items),
+    )
+    if result.ticker is None:
+        raise not_found("Ticker", normalized_symbol)
+
+    return MetricsRead(
+        symbol=normalized_symbol,
+        start_date=start_date,
+        end_date=end_date,
+        items=[MetricRead.model_validate(item) for item in result.items],
+        limit=limit,
+        offset=offset,
+        count=len(result.items),
+        total=result.total,
     )
 
 

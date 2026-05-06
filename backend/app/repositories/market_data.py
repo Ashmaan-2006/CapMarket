@@ -35,6 +35,13 @@ class PriceHistoryResult:
     total: int
 
 
+@dataclass(frozen=True)
+class MetricHistoryResult:
+    ticker: Ticker | None
+    items: list[ComputedMetric]
+    total: int
+
+
 def _utc_now() -> datetime:
     return datetime.now(UTC)
 
@@ -120,6 +127,36 @@ def list_historical_prices(
     )
     total = db.execute(count_query).scalar_one()
     return PriceHistoryResult(ticker=ticker, items=items, total=total)
+
+
+def list_computed_metrics(
+    db: Session,
+    *,
+    symbol: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: int = 252,
+    offset: int = 0,
+) -> MetricHistoryResult:
+    ticker = get_ticker_by_symbol(db, symbol)
+    if ticker is None:
+        return MetricHistoryResult(ticker=None, items=[], total=0)
+
+    filters = [ComputedMetric.ticker_id == ticker.id]
+    if start_date:
+        filters.append(ComputedMetric.metric_date >= start_date)
+    if end_date:
+        filters.append(ComputedMetric.metric_date <= end_date)
+
+    query = select(ComputedMetric).where(*filters)
+    count_query = select(func.count()).select_from(ComputedMetric).where(*filters)
+    items = list(
+        db.execute(
+            query.order_by(ComputedMetric.metric_date).limit(limit).offset(offset)
+        ).scalars()
+    )
+    total = db.execute(count_query).scalar_one()
+    return MetricHistoryResult(ticker=ticker, items=items, total=total)
 
 
 def upsert_historical_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> PriceLoadResult:

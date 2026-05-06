@@ -93,10 +93,13 @@ class MetricRead(BaseModel):
 
 class MetricsRead(BaseModel):
     symbol: str
+    start_date: date | None = None
+    end_date: date | None = None
     items: list[MetricRead]
     limit: int
     offset: int
     count: int
+    total: int
 
 
 class EtlRunRequest(BaseModel):
