@@ -8,6 +8,7 @@ from app.core.config import Settings, get_settings
 from app.db import get_db
 from app.errors import not_found, service_unavailable, validation_failed
 from app.models import AiReport, ComputedMetric, EtlJob, HistoricalPrice, Ticker
+from app.repositories.market_data import list_tickers as list_ticker_records
 from app.schemas import (
     AiReportRead,
     MarketDataRead,
@@ -59,25 +60,26 @@ def readiness(
 def list_tickers(
     db: Session = Depends(get_db),
     search: str | None = None,
+    active_only: bool = True,
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> TickerListRead:
-    query = select(Ticker).order_by(Ticker.symbol).limit(limit).offset(offset)
-    if search:
-        normalized_search = _normalize_symbol_param(search)
-        query = (
-            select(Ticker)
-            .where(Ticker.symbol.ilike(f"%{normalized_search}%"))
-            .order_by(Ticker.symbol)
-            .limit(limit)
-            .offset(offset)
-        )
-    items = list(db.execute(query).scalars())
-    return TickerListRead(
-        items=[TickerRead.model_validate(item) for item in items],
+    normalized_search = _normalize_symbol_param(search) if search else None
+    result = list_ticker_records(
+        db,
+        search=normalized_search,
+        active_only=active_only,
         limit=limit,
         offset=offset,
-        count=len(items),
+    )
+    return TickerListRead(
+        items=[TickerRead.model_validate(item) for item in result.items],
+        limit=limit,
+        offset=offset,
+        count=len(result.items),
+        total=result.total,
+        search=normalized_search,
+        active_only=active_only,
     )
 
 

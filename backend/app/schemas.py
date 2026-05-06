@@ -48,6 +48,9 @@ class TickerListRead(BaseModel):
     limit: int
     offset: int
     count: int
+    total: int
+    search: str | None = None
+    active_only: bool
 
 
 class PriceRead(BaseModel):

@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pandas as pd
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,12 @@ class PriceLoadResult:
 class MetricLoadResult:
     ticker: Ticker
     rows_submitted: int
+
+
+@dataclass(frozen=True)
+class TickerListResult:
+    items: list[Ticker]
+    total: int
 
 
 def _utc_now() -> datetime:
@@ -47,6 +54,31 @@ def upsert_ticker(db: Session, symbol: str, asset_type: str = "equity") -> Ticke
     if ticker is None:
         raise RuntimeError(f"Ticker upsert failed for {normalized_symbol}")
     return ticker
+
+
+def list_tickers(
+    db: Session,
+    *,
+    search: str | None = None,
+    active_only: bool = True,
+    limit: int = 50,
+    offset: int = 0,
+) -> TickerListResult:
+    filters = []
+    if active_only:
+        filters.append(Ticker.is_active.is_(True))
+    if search:
+        filters.append(Ticker.symbol.ilike(f"%{search.strip().upper()}%"))
+
+    query = select(Ticker)
+    count_query = select(func.count()).select_from(Ticker)
+    if filters:
+        query = query.where(*filters)
+        count_query = count_query.where(*filters)
+
+    items = list(db.execute(query.order_by(Ticker.symbol).limit(limit).offset(offset)).scalars())
+    total = db.execute(count_query).scalar_one()
+    return TickerListResult(items=items, total=total)
 
 
 def upsert_historical_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> PriceLoadResult:

@@ -64,6 +64,7 @@ type PaginatedResponse<T> = {
   limit: number;
   offset: number;
   count: number;
+  total?: number;
 };
 
 type SymbolSeriesResponse<T> = PaginatedResponse<T> & {
