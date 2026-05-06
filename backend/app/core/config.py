@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     database_url: str = Field(default="postgresql+psycopg://capital:capital@localhost:5432/capital_markets")
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=10, ge=0)
+    db_pool_timeout: int = Field(default=30, ge=1)
     backend_cors_origins: str = "http://localhost:3000"
     market_data_provider: str = "stooq"
     default_symbols: str = "AAPL,MSFT,SPY,TSLA,NVDA,JPM"

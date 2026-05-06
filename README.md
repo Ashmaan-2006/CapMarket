@@ -116,6 +116,9 @@ See `.env.example`.
 Important values:
 
 - `DATABASE_URL`
+- `DB_POOL_SIZE`
+- `DB_MAX_OVERFLOW`
+- `DB_POOL_TIMEOUT`
 - `APP_ENV`
 - `LOG_LEVEL`
 - `MARKET_DATA_PROVIDER`
