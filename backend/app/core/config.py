@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     db_pool_timeout: int = Field(default=30, ge=1)
     backend_cors_origins: str = "http://localhost:3000"
     market_data_provider: str = "stooq"
+    market_data_timeout_seconds: float = Field(default=30.0, gt=0)
+    market_data_retries: int = Field(default=2, ge=0, le=5)
     default_symbols: str = "AAPL,MSFT,SPY,TSLA,NVDA,JPM"
     ai_provider: str = "openai"
     openai_api_key: str | None = None

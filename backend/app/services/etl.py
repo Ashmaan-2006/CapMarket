@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings
 from app.models import ComputedMetric, EtlJob, EtlStatus, HistoricalPrice, Ticker
 from app.services.analytics import compute_metrics
-from app.services.market_data import get_market_data_provider
+from app.services.market_data import MarketDataRequest, get_market_data_provider
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +142,21 @@ async def run_market_data_etl(
     db.commit()
     db.refresh(job)
 
-    provider = get_market_data_provider(settings.market_data_provider)
+    provider = get_market_data_provider(
+        settings.market_data_provider,
+        timeout_seconds=settings.market_data_timeout_seconds,
+        retries=settings.market_data_retries,
+    )
     rows_extracted = 0
     rows_loaded = 0
 
     try:
         for symbol in normalized_symbols:
             logger.info("Running ETL for %s", symbol)
-            raw_prices = await provider.fetch_history(symbol, start_date, end_date)
+            result = await provider.fetch_history(
+                MarketDataRequest(symbol=symbol, start_date=start_date, end_date=end_date)
+            )
+            raw_prices = result.rows
             prices = _clean_prices(raw_prices)
             rows_extracted += len(prices)
             ticker = _upsert_ticker(db, symbol)
@@ -174,4 +181,3 @@ async def run_market_data_etl(
         db.commit()
         logger.exception("ETL job %s failed", job.id)
         return persisted_job
-
