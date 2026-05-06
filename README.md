@@ -81,6 +81,8 @@ Report endpoints use the same production API conventions as market data:
 - `GET /reports/{symbol}` returns `{ symbol, items, limit, offset, count, total }`.
 - `POST /reports/generate` creates a stored report from computed metrics and returns `201 Created`.
 
+See [docs/api-contract.md](docs/api-contract.md) for endpoint parameters, response envelopes, examples, and status codes.
+
 ## Local Development
 
 1. Copy environment values:
