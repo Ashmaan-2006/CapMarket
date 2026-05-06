@@ -62,6 +62,7 @@ OpenAI/Gemini Report Generation
 - REST endpoints for tickers, market data, metrics, top movers, ETL, and AI reports.
 - AI reports generated from structured metrics snapshots.
 - Dockerized local development with separate frontend, backend, and database services.
+- Request observability through correlation IDs, structured request logs, and process timing headers.
 
 ## API Surface
 

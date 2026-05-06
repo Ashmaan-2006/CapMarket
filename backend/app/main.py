@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.core.middleware import request_context_middleware
 
 
 def create_app() -> FastAPI:
@@ -23,6 +24,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.middleware("http")(request_context_middleware)
     app.include_router(router)
     return app
 

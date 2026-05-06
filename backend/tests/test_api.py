@@ -32,6 +32,15 @@ def test_health_endpoint_returns_environment() -> None:
     assert response.json()["service"] == "capital-markets-api"
 
 
+def test_request_context_headers_are_returned() -> None:
+    client = _client()
+
+    response = client.get("/health", headers={"X-Request-ID": "test-request-123"})
+
+    assert response.headers["X-Request-ID"] == "test-request-123"
+    assert float(response.headers["X-Process-Time-ms"]) >= 0
+
+
 def test_tickers_endpoint_returns_paginated_payload(monkeypatch) -> None:
     ticker = SimpleNamespace(
         id=1,
