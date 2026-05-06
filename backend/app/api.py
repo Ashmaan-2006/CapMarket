@@ -7,8 +7,11 @@ from sqlalchemy.orm import Session
 from app.core.config import Settings, get_settings
 from app.db import get_db
 from app.errors import not_found, service_unavailable, validation_failed
-from app.models import AiReport, ComputedMetric, EtlJob, HistoricalPrice, Ticker
-from app.repositories.market_data import list_tickers as list_ticker_records
+from app.models import AiReport, ComputedMetric, EtlJob, Ticker
+from app.repositories.market_data import (
+    list_historical_prices,
+    list_tickers as list_ticker_records,
+)
 from app.schemas import (
     AiReportRead,
     MarketDataRead,
@@ -96,25 +99,26 @@ def get_market_data(
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="start_date must be before or equal to end_date")
 
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
-    if ticker is None:
+    result = list_historical_prices(
+        db,
+        symbol=normalized_symbol,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+        offset=offset,
+    )
+    if result.ticker is None:
         raise not_found("Ticker", normalized_symbol)
 
-    query = select(HistoricalPrice).where(HistoricalPrice.ticker_id == ticker.id)
-    if start_date:
-        query = query.where(HistoricalPrice.price_date >= start_date)
-    if end_date:
-        query = query.where(HistoricalPrice.price_date <= end_date)
-    query = query.order_by(HistoricalPrice.price_date).limit(limit).offset(offset)
-    items = list(db.execute(query).scalars())
     return MarketDataRead(
         symbol=normalized_symbol,
         start_date=start_date,
         end_date=end_date,
-        items=[PriceRead.model_validate(item) for item in items],
+        items=[PriceRead.model_validate(item) for item in result.items],
         limit=limit,
         offset=offset,
-        count=len(items),
+        count=len(result.items),
+        total=result.total,
     )
 
 

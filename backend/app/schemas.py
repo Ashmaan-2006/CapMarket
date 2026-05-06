@@ -73,6 +73,7 @@ class MarketDataRead(BaseModel):
     limit: int
     offset: int
     count: int
+    total: int
 
 
 class MetricRead(BaseModel):

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pandas as pd
@@ -25,6 +25,13 @@ class MetricLoadResult:
 @dataclass(frozen=True)
 class TickerListResult:
     items: list[Ticker]
+    total: int
+
+
+@dataclass(frozen=True)
+class PriceHistoryResult:
+    ticker: Ticker | None
+    items: list[HistoricalPrice]
     total: int
 
 
@@ -79,6 +86,40 @@ def list_tickers(
     items = list(db.execute(query.order_by(Ticker.symbol).limit(limit).offset(offset)).scalars())
     total = db.execute(count_query).scalar_one()
     return TickerListResult(items=items, total=total)
+
+
+def get_ticker_by_symbol(db: Session, symbol: str) -> Ticker | None:
+    return db.execute(select(Ticker).where(Ticker.symbol == symbol.strip().upper())).scalar_one_or_none()
+
+
+def list_historical_prices(
+    db: Session,
+    *,
+    symbol: str,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    limit: int = 252,
+    offset: int = 0,
+) -> PriceHistoryResult:
+    ticker = get_ticker_by_symbol(db, symbol)
+    if ticker is None:
+        return PriceHistoryResult(ticker=None, items=[], total=0)
+
+    filters = [HistoricalPrice.ticker_id == ticker.id]
+    if start_date:
+        filters.append(HistoricalPrice.price_date >= start_date)
+    if end_date:
+        filters.append(HistoricalPrice.price_date <= end_date)
+
+    query = select(HistoricalPrice).where(*filters)
+    count_query = select(func.count()).select_from(HistoricalPrice).where(*filters)
+    items = list(
+        db.execute(
+            query.order_by(HistoricalPrice.price_date).limit(limit).offset(offset)
+        ).scalars()
+    )
+    total = db.execute(count_query).scalar_one()
+    return PriceHistoryResult(ticker=ticker, items=items, total=total)
 
 
 def upsert_historical_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> PriceLoadResult:
