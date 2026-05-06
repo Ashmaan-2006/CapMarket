@@ -5,6 +5,12 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class HealthRead(BaseModel):
+    status: str
+    service: str = "capital-markets-api"
+    environment: str
+
+
 class TickerRead(BaseModel):
     id: int
     symbol: str
@@ -90,4 +96,3 @@ class AiReportRead(BaseModel):
     metrics_snapshot: dict[str, Any]
     model: str
     created_at: datetime
-

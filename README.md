@@ -116,6 +116,8 @@ See `.env.example`.
 Important values:
 
 - `DATABASE_URL`
+- `APP_ENV`
+- `LOG_LEVEL`
 - `MARKET_DATA_PROVIDER`
 - `OPENAI_API_KEY`
 - `AI_PROVIDER`
@@ -142,4 +144,3 @@ The project is planned as 30 meaningful commits. See [docs/commit-plan.md](docs/
 - How ETL job status enables observability and operational recovery.
 - Why AI receives validated metric snapshots rather than raw provider data.
 - How the schema supports future expansion into sectors, portfolios, alerts, and analyst annotations.
-

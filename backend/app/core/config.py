@@ -5,6 +5,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    app_env: str = "development"
+    log_level: str = "INFO"
     database_url: str = Field(default="postgresql+psycopg://capital:capital@localhost:5432/capital_markets")
     backend_cors_origins: str = "http://localhost:3000"
     market_data_provider: str = "stooq"
@@ -23,8 +25,11 @@ class Settings(BaseSettings):
     def default_symbol_list(self) -> list[str]:
         return [symbol.strip().upper() for symbol in self.default_symbols.split(",") if symbol.strip()]
 
+    @property
+    def is_development(self) -> bool:
+        return self.app_env.lower() in {"local", "development", "dev"}
+
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

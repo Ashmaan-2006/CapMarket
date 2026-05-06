@@ -1,7 +1,7 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -11,6 +11,7 @@ from app.schemas import (
     AiReportRead,
     EtlJobRead,
     EtlRunRequest,
+    HealthRead,
     MetricRead,
     PriceRead,
     ReportGenerateRequest,
@@ -23,9 +24,21 @@ from app.services.reports import generate_report
 router = APIRouter()
 
 
-@router.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+@router.get("/health", response_model=HealthRead)
+def health(settings: Settings = Depends(get_settings)) -> HealthRead:
+    return HealthRead(status="ok", environment=settings.app_env)
+
+
+@router.get("/health/ready", response_model=HealthRead)
+def readiness(
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> HealthRead:
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is not ready") from exc
+    return HealthRead(status="ready", environment=settings.app_env)
 
 
 @router.get("/tickers", response_model=list[TickerRead])
@@ -176,4 +189,3 @@ def create_report(
         model=report.model,
         created_at=report.created_at,
     )
-

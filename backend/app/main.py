@@ -7,12 +7,14 @@ from app.core.logging import configure_logging
 
 
 def create_app() -> FastAPI:
-    configure_logging()
     settings = get_settings()
+    configure_logging(settings.log_level)
     app = FastAPI(
         title="Capital Markets AI Reporting System",
         version="0.1.0",
         description="Market data ETL, analytics, and grounded AI reporting APIs.",
+        docs_url="/docs" if settings.is_development else None,
+        redoc_url="/redoc" if settings.is_development else None,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -26,4 +28,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-
