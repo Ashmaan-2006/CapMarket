@@ -1,6 +1,7 @@
 import logging
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import Any
 
 import pandas as pd
 from sqlalchemy import select
@@ -13,6 +14,117 @@ from app.services.analytics import compute_metrics
 from app.services.market_data import MarketDataRequest, get_market_data_provider
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
+
+
+def _job_metadata(
+    *,
+    provider_name: str,
+    start_date: date | None,
+    end_date: date | None,
+    completed_symbols: list[str] | None = None,
+    failed_symbols: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "provider": provider_name,
+        "start_date": start_date.isoformat() if start_date else None,
+        "end_date": end_date.isoformat() if end_date else None,
+        "completed_symbols": completed_symbols or [],
+        "failed_symbols": failed_symbols or {},
+    }
+
+
+def _create_job(
+    db: Session,
+    *,
+    symbols: list[str],
+    provider_name: str,
+    start_date: date | None,
+    end_date: date | None,
+) -> EtlJob:
+    job = EtlJob(
+        job_type="market_data",
+        status=EtlStatus.RUNNING.value,
+        symbols=symbols,
+        started_at=_utc_now(),
+        metadata_json=_job_metadata(
+            provider_name=provider_name,
+            start_date=start_date,
+            end_date=end_date,
+        ),
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _update_job_progress(
+    db: Session,
+    job: EtlJob,
+    *,
+    rows_extracted: int,
+    rows_loaded: int,
+    completed_symbols: list[str],
+    failed_symbols: dict[str, str],
+    provider_name: str,
+    start_date: date | None,
+    end_date: date | None,
+) -> None:
+    job.rows_extracted = rows_extracted
+    job.rows_loaded = rows_loaded
+    job.metadata_json = _job_metadata(
+        provider_name=provider_name,
+        start_date=start_date,
+        end_date=end_date,
+        completed_symbols=completed_symbols,
+        failed_symbols=failed_symbols,
+    )
+    db.commit()
+
+
+def _mark_job_succeeded(db: Session, job: EtlJob, rows_extracted: int, rows_loaded: int) -> EtlJob:
+    job.status = EtlStatus.SUCCEEDED.value
+    job.rows_extracted = rows_extracted
+    job.rows_loaded = rows_loaded
+    job.finished_at = _utc_now()
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def _mark_job_failed(
+    db: Session,
+    job_id: int,
+    *,
+    error_message: str,
+    rows_extracted: int,
+    rows_loaded: int,
+    provider_name: str,
+    start_date: date | None,
+    end_date: date | None,
+    completed_symbols: list[str],
+    failed_symbols: dict[str, str],
+) -> EtlJob:
+    persisted_job = db.execute(select(EtlJob).where(EtlJob.id == job_id)).scalar_one()
+    persisted_job.status = EtlStatus.FAILED.value
+    persisted_job.error_message = error_message
+    persisted_job.rows_extracted = rows_extracted
+    persisted_job.rows_loaded = rows_loaded
+    persisted_job.finished_at = _utc_now()
+    persisted_job.metadata_json = _job_metadata(
+        provider_name=provider_name,
+        start_date=start_date,
+        end_date=end_date,
+        completed_symbols=completed_symbols,
+        failed_symbols=failed_symbols,
+    )
+    db.commit()
+    db.refresh(persisted_job)
+    return persisted_job
 
 
 def _clean_prices(frame: pd.DataFrame) -> pd.DataFrame:
@@ -42,7 +154,7 @@ def _upsert_ticker(db: Session, symbol: str) -> Ticker:
     stmt = insert(Ticker).values(symbol=symbol, name=symbol, asset_type="equity")
     stmt = stmt.on_conflict_do_update(
         index_elements=[Ticker.symbol],
-        set_={"updated_at": datetime.now(UTC), "is_active": True},
+        set_={"updated_at": _utc_now(), "is_active": True},
     ).returning(Ticker.id)
     ticker_id = db.execute(stmt).scalar_one()
     return db.get(Ticker, ticker_id)
@@ -76,7 +188,7 @@ def _upsert_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
             "close": stmt.excluded.close,
             "adjusted_close": stmt.excluded.adjusted_close,
             "volume": stmt.excluded.volume,
-            "updated_at": datetime.now(UTC),
+            "updated_at": _utc_now(),
         },
     )
     db.execute(stmt)
@@ -117,7 +229,7 @@ def _upsert_metrics(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
             "ema_20": stmt.excluded.ema_20,
             "drawdown": stmt.excluded.drawdown,
             "volume_ratio_20d": stmt.excluded.volume_ratio_20d,
-            "updated_at": datetime.now(UTC),
+            "updated_at": _utc_now(),
         },
     )
     db.execute(stmt)
@@ -132,52 +244,67 @@ async def run_market_data_etl(
     end_date: date | None,
 ) -> EtlJob:
     normalized_symbols = [s.upper() for s in (symbols or settings.default_symbol_list)]
-    job = EtlJob(
-        job_type="market_data",
-        status=EtlStatus.RUNNING.value,
-        symbols=normalized_symbols,
-        started_at=datetime.now(UTC),
-    )
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
     provider = get_market_data_provider(
         settings.market_data_provider,
         timeout_seconds=settings.market_data_timeout_seconds,
         retries=settings.market_data_retries,
     )
+    job = _create_job(
+        db,
+        symbols=normalized_symbols,
+        provider_name=provider.source,
+        start_date=start_date,
+        end_date=end_date,
+    )
     rows_extracted = 0
     rows_loaded = 0
+    completed_symbols: list[str] = []
+    failed_symbols: dict[str, str] = {}
 
     try:
         for symbol in normalized_symbols:
-            logger.info("Running ETL for %s", symbol)
-            result = await provider.fetch_history(
-                MarketDataRequest(symbol=symbol, start_date=start_date, end_date=end_date)
-            )
-            raw_prices = result.rows
-            prices = _clean_prices(raw_prices)
-            rows_extracted += len(prices)
-            ticker = _upsert_ticker(db, symbol)
-            rows_loaded += _upsert_prices(db, ticker, prices)
-            _upsert_metrics(db, ticker, prices)
+            try:
+                logger.info("Running ETL for %s", symbol)
+                result = await provider.fetch_history(
+                    MarketDataRequest(symbol=symbol, start_date=start_date, end_date=end_date)
+                )
+                raw_prices = result.rows
+                prices = _clean_prices(raw_prices)
+                rows_extracted += len(prices)
+                ticker = _upsert_ticker(db, symbol)
+                rows_loaded += _upsert_prices(db, ticker, prices)
+                _upsert_metrics(db, ticker, prices)
+                completed_symbols.append(symbol)
+                _update_job_progress(
+                    db,
+                    job,
+                    rows_extracted=rows_extracted,
+                    rows_loaded=rows_loaded,
+                    completed_symbols=completed_symbols,
+                    failed_symbols=failed_symbols,
+                    provider_name=provider.source,
+                    start_date=start_date,
+                    end_date=end_date,
+                )
+            except Exception as exc:
+                db.rollback()
+                failed_symbols[symbol] = str(exc)
+                logger.exception("ETL failed for symbol %s", symbol)
+                raise
 
-        job.status = EtlStatus.SUCCEEDED.value
-        job.rows_extracted = rows_extracted
-        job.rows_loaded = rows_loaded
-        job.finished_at = datetime.now(UTC)
-        db.commit()
-        db.refresh(job)
-        return job
+        return _mark_job_succeeded(db, job, rows_extracted, rows_loaded)
     except Exception as exc:
         db.rollback()
-        persisted_job = db.execute(select(EtlJob).where(EtlJob.id == job.id)).scalar_one()
-        persisted_job.status = EtlStatus.FAILED.value
-        persisted_job.error_message = str(exc)
-        persisted_job.rows_extracted = rows_extracted
-        persisted_job.rows_loaded = rows_loaded
-        persisted_job.finished_at = datetime.now(UTC)
-        db.commit()
         logger.exception("ETL job %s failed", job.id)
-        return persisted_job
+        return _mark_job_failed(
+            db,
+            job.id,
+            error_message=str(exc),
+            rows_extracted=rows_extracted,
+            rows_loaded=rows_loaded,
+            provider_name=provider.source,
+            start_date=start_date,
+            end_date=end_date,
+            completed_symbols=completed_symbols,
+            failed_symbols=failed_symbols,
+        )

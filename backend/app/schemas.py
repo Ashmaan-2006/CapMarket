@@ -127,6 +127,7 @@ class EtlJobRead(BaseModel):
     rows_extracted: int
     rows_loaded: int
     error_message: str | None
+    metadata_json: dict[str, Any] | None
 
     model_config = {"from_attributes": True}
 
