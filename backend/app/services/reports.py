@@ -1,8 +1,9 @@
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from openai import OpenAI
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -17,7 +18,49 @@ class AnalystReportOutput(BaseModel):
     risk_notes: list[str]
 
 
-def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -> dict[str, Any]:
+class ReportMetricSnapshot(BaseModel):
+    symbol: str
+    report_date: date
+    latest_price: float | None
+    volume: int | None
+    daily_return: float | None
+    weekly_return: float | None
+    monthly_return: float | None
+    volatility_20d: float | None
+    sma_20: float | None
+    sma_50: float | None
+    ema_20: float | None
+    drawdown: float | None
+    volume_ratio_20d: float | None
+    signals: list[str] = Field(default_factory=list)
+
+    def to_prompt_payload(self) -> dict[str, Any]:
+        return self.model_dump(mode="json")
+
+
+def _decimal_to_float(value: Decimal | None) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _build_signals(snapshot: ReportMetricSnapshot) -> list[str]:
+    signals: list[str] = []
+    if snapshot.daily_return is not None and abs(snapshot.daily_return) >= 0.03:
+        direction = "positive" if snapshot.daily_return > 0 else "negative"
+        signals.append(f"large_{direction}_daily_return")
+    if snapshot.volume_ratio_20d is not None and snapshot.volume_ratio_20d >= 2:
+        signals.append("unusually_high_volume")
+    if snapshot.drawdown is not None and snapshot.drawdown <= -0.10:
+        signals.append("material_drawdown")
+    if (
+        snapshot.latest_price is not None
+        and snapshot.sma_20 is not None
+        and snapshot.latest_price > snapshot.sma_20
+    ):
+        signals.append("price_above_20d_sma")
+    return signals
+
+
+def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -> ReportMetricSnapshot:
     ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one_or_none()
     if ticker is None:
         raise ValueError(f"Ticker {symbol.upper()} not found")
@@ -35,30 +78,32 @@ def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -
         .order_by(desc(HistoricalPrice.price_date))
     ).scalar_one_or_none()
 
-    return {
-        "symbol": ticker.symbol,
-        "report_date": metric.metric_date.isoformat(),
-        "latest_price": float(price.close) if price else None,
-        "volume": price.volume if price else None,
-        "daily_return": float(metric.daily_return) if metric.daily_return is not None else None,
-        "weekly_return": float(metric.weekly_return) if metric.weekly_return is not None else None,
-        "monthly_return": float(metric.monthly_return) if metric.monthly_return is not None else None,
-        "volatility_20d": float(metric.volatility_20d) if metric.volatility_20d is not None else None,
-        "sma_20": float(metric.sma_20) if metric.sma_20 is not None else None,
-        "sma_50": float(metric.sma_50) if metric.sma_50 is not None else None,
-        "ema_20": float(metric.ema_20) if metric.ema_20 is not None else None,
-        "drawdown": float(metric.drawdown) if metric.drawdown is not None else None,
-        "volume_ratio_20d": float(metric.volume_ratio_20d) if metric.volume_ratio_20d is not None else None,
-    }
+    snapshot = ReportMetricSnapshot(
+        symbol=ticker.symbol,
+        report_date=metric.metric_date,
+        latest_price=float(price.close) if price else None,
+        volume=price.volume if price else None,
+        daily_return=_decimal_to_float(metric.daily_return),
+        weekly_return=_decimal_to_float(metric.weekly_return),
+        monthly_return=_decimal_to_float(metric.monthly_return),
+        volatility_20d=_decimal_to_float(metric.volatility_20d),
+        sma_20=_decimal_to_float(metric.sma_20),
+        sma_50=_decimal_to_float(metric.sma_50),
+        ema_20=_decimal_to_float(metric.ema_20),
+        drawdown=_decimal_to_float(metric.drawdown),
+        volume_ratio_20d=_decimal_to_float(metric.volume_ratio_20d),
+    )
+    return snapshot.model_copy(update={"signals": _build_signals(snapshot)})
 
 
 def generate_report(db: Session, settings: Settings, symbol: str, report_date: date | None, report_type: str) -> AiReport:
     snapshot = build_metrics_snapshot(db, symbol, report_date)
     ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one()
+    prompt_payload = snapshot.to_prompt_payload()
 
     if not settings.openai_api_key:
         output = AnalystReportOutput(
-            summary=f"{ticker.symbol} report generated from stored metrics for {snapshot['report_date']}.",
+            summary=f"{ticker.symbol} report generated from stored metrics for {snapshot.report_date.isoformat()}.",
             trend_insights=["AI provider is not configured; metrics snapshot is available for review."],
             anomaly_explanations=[],
             risk_notes=["Set OPENAI_API_KEY to enable analyst-style report generation."],
@@ -79,7 +124,7 @@ def generate_report(db: Session, settings: Settings, symbol: str, report_date: d
                 },
                 {
                     "role": "user",
-                    "content": f"Structured metrics snapshot: {snapshot}",
+                    "content": f"Structured metrics snapshot: {prompt_payload}",
                 },
             ],
             response_format=AnalystReportOutput,
@@ -91,17 +136,16 @@ def generate_report(db: Session, settings: Settings, symbol: str, report_date: d
 
     report = AiReport(
         ticker_id=ticker.id,
-        report_date=date.fromisoformat(snapshot["report_date"]),
+        report_date=snapshot.report_date,
         report_type=report_type,
         summary=output.summary,
         trend_insights=output.trend_insights,
         anomaly_explanations=output.anomaly_explanations,
         risk_notes=output.risk_notes,
-        metrics_snapshot=snapshot,
+        metrics_snapshot=prompt_payload,
         model=model,
     )
     db.add(report)
     db.commit()
     db.refresh(report)
     return report
-
