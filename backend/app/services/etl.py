@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
@@ -13,6 +14,20 @@ from app.services.market_data import MarketDataRequest, get_market_data_provider
 from app.services.transforms import clean_price_history
 
 logger = logging.getLogger(__name__)
+
+
+def list_etl_jobs(
+    db: Session,
+    *,
+    status: str | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[EtlJob]:
+    query = select(EtlJob)
+    if status:
+        query = query.where(EtlJob.status == status)
+    query = query.order_by(desc(EtlJob.created_at)).limit(limit).offset(offset)
+    return list(db.execute(query).scalars())
 
 
 def _utc_now() -> datetime:

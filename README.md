@@ -132,10 +132,6 @@ Important values:
 
 See [docs/architecture.md](docs/architecture.md) for the schema, relationships, indexes, and performance notes.
 
-## Build Plan
-
-The project is planned as 30 meaningful commits. See [docs/commit-plan.md](docs/commit-plan.md).
-
 ## Resume Bullets
 
 - Built a Dockerized capital markets reporting platform with FastAPI, PostgreSQL, SQLAlchemy, Pandas, and Next.js to ingest historical market data, compute analytics, and expose analyst-facing APIs.

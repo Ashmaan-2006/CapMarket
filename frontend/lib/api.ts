@@ -72,6 +72,10 @@ type SymbolSeriesResponse<T> = PaginatedResponse<T> & {
   end_date?: string | null;
 };
 
+type EtlStatusResponse = PaginatedResponse<EtlJob> & {
+  status: string | null;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -105,7 +109,10 @@ export const api = {
     );
     return response.items;
   },
-  etlStatus: () => request<EtlJob[]>("/etl/status"),
+  etlStatus: async () => {
+    const response = await request<EtlStatusResponse>("/etl/status");
+    return response.items;
+  },
   runEtl: (symbols: string[]) =>
     request<EtlJob>("/etl/run", { method: "POST", body: JSON.stringify({ symbols }) }),
   reports: (symbol: string) => request<AiReport[]>(`/reports/${symbol}`),

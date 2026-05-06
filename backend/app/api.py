@@ -13,6 +13,8 @@ from app.schemas import (
     MarketDataRead,
     EtlJobRead,
     EtlRunRequest,
+    EtlStatusRead,
+    EtlStatusName,
     HealthRead,
     MetricRead,
     MetricsRead,
@@ -23,7 +25,7 @@ from app.schemas import (
     TopMoverRead,
     normalize_symbol,
 )
-from app.services.etl import run_market_data_etl
+from app.services.etl import list_etl_jobs, run_market_data_etl
 from app.services.reports import generate_report
 
 router = APIRouter()
@@ -166,7 +168,7 @@ def get_top_movers(
     return [TopMoverRead(symbol=row[0], metric_date=row[1], daily_return=row[2], volume_ratio_20d=row[3]) for row in rows]
 
 
-@router.post("/etl/run", response_model=EtlJobRead)
+@router.post("/etl/run", response_model=EtlJobRead, status_code=202)
 async def run_etl(
     payload: EtlRunRequest,
     db: Session = Depends(get_db),
@@ -175,12 +177,21 @@ async def run_etl(
     return await run_market_data_etl(db, settings, payload.symbols, payload.start_date, payload.end_date)
 
 
-@router.get("/etl/status", response_model=list[EtlJobRead])
+@router.get("/etl/status", response_model=EtlStatusRead)
 def get_etl_status(
     db: Session = Depends(get_db),
+    status: EtlStatusName | None = None,
     limit: int = Query(default=20, ge=1, le=100),
-) -> list[EtlJob]:
-    return list(db.execute(select(EtlJob).order_by(desc(EtlJob.created_at)).limit(limit)).scalars())
+    offset: int = Query(default=0, ge=0),
+) -> EtlStatusRead:
+    items = list_etl_jobs(db, status=status, limit=limit, offset=offset)
+    return EtlStatusRead(
+        items=[EtlJobRead.model_validate(item) for item in items],
+        limit=limit,
+        offset=offset,
+        count=len(items),
+        status=status,
+    )
 
 
 @router.get("/reports/{symbol}", response_model=list[AiReportRead])

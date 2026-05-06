@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 Symbol = str
 ReportTypeName = Literal["daily", "weekly", "monthly"]
+EtlStatusName = Literal["pending", "running", "succeeded", "failed"]
 
 
 def normalize_symbol(value: str) -> str:
@@ -130,6 +131,14 @@ class EtlJobRead(BaseModel):
     metadata_json: dict[str, Any] | None
 
     model_config = {"from_attributes": True}
+
+
+class EtlStatusRead(BaseModel):
+    items: list[EtlJobRead]
+    limit: int
+    offset: int
+    count: int
+    status: EtlStatusName | None
 
 
 class TopMoverRead(BaseModel):
