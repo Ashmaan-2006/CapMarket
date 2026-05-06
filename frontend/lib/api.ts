@@ -33,6 +33,14 @@ export type MetricPoint = {
   volume_ratio_20d: string | null;
 };
 
+export type TopMover = {
+  symbol: string;
+  metric_date: string;
+  daily_return: string | null;
+  volume_ratio_20d: string | null;
+  close: string | null;
+};
+
 export type EtlJob = {
   id: number;
   job_type: string;
@@ -77,6 +85,14 @@ type EtlStatusResponse = PaginatedResponse<EtlJob> & {
   status: string | null;
 };
 
+type TopMoversResponse = {
+  items: TopMover[];
+  metric_date: string | null;
+  direction: "gainers" | "losers";
+  limit: number;
+  count: number;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -116,6 +132,10 @@ export const api = {
   },
   runEtl: (symbols: string[]) =>
     request<EtlJob>("/etl/run", { method: "POST", body: JSON.stringify({ symbols }) }),
+  topMovers: async (direction: "gainers" | "losers" = "gainers") => {
+    const response = await request<TopMoversResponse>(`/top-movers?direction=${direction}`);
+    return response.items;
+  },
   reports: (symbol: string) => request<AiReport[]>(`/reports/${symbol}`),
   generateReport: (symbol: string) =>
     request<AiReport>("/reports/generate", {

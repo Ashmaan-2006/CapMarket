@@ -12,6 +12,7 @@ from app.repositories.market_data import (
     list_computed_metrics,
     list_historical_prices,
     list_tickers as list_ticker_records,
+    list_top_movers,
 )
 from app.schemas import (
     AiReportRead,
@@ -28,6 +29,7 @@ from app.schemas import (
     TickerRead,
     TickerListRead,
     TopMoverRead,
+    TopMoversRead,
     normalize_symbol,
 )
 from app.services.etl import list_etl_jobs, run_market_data_etl
@@ -159,27 +161,30 @@ def get_metrics(
     )
 
 
-@router.get("/top-movers", response_model=list[TopMoverRead])
+@router.get("/top-movers", response_model=TopMoversRead)
 def get_top_movers(
     db: Session = Depends(get_db),
     metric_date: date | None = None,
     direction: str = Query(default="gainers", pattern="^(gainers|losers)$"),
     limit: int = Query(default=10, ge=1, le=50),
-) -> list[TopMoverRead]:
-    if metric_date is None:
-        metric_date = db.execute(select(ComputedMetric.metric_date).order_by(desc(ComputedMetric.metric_date))).scalar_one_or_none()
-    if metric_date is None:
-        return []
-
-    order_column = desc(ComputedMetric.daily_return) if direction == "gainers" else ComputedMetric.daily_return
-    rows = db.execute(
-        select(Ticker.symbol, ComputedMetric.metric_date, ComputedMetric.daily_return, ComputedMetric.volume_ratio_20d)
-        .join(ComputedMetric, ComputedMetric.ticker_id == Ticker.id)
-        .where(ComputedMetric.metric_date == metric_date)
-        .order_by(order_column)
-        .limit(limit)
-    ).all()
-    return [TopMoverRead(symbol=row[0], metric_date=row[1], daily_return=row[2], volume_ratio_20d=row[3]) for row in rows]
+) -> TopMoversRead:
+    result = list_top_movers(db, metric_date=metric_date, direction=direction, limit=limit)
+    items = [
+        TopMoverRead(
+            symbol=item.symbol,
+            metric_date=item.metric_date,
+            daily_return=item.daily_return,
+            volume_ratio_20d=item.volume_ratio_20d,
+        )
+        for item in result.items
+    ]
+    return TopMoversRead(
+        items=items,
+        metric_date=result.metric_date,
+        direction=direction,
+        limit=limit,
+        count=len(items),
+    )
 
 
 @router.post("/etl/run", response_model=EtlJobRead, status_code=202)

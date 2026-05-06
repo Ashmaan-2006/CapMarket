@@ -3,7 +3,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import desc, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,21 @@ class MetricHistoryResult:
     ticker: Ticker | None
     items: list[ComputedMetric]
     total: int
+
+
+@dataclass(frozen=True)
+class TopMoverRecord:
+    symbol: str
+    metric_date: date
+    daily_return: Decimal | None
+    volume_ratio_20d: Decimal | None
+
+
+@dataclass(frozen=True)
+class TopMoversResult:
+    items: list[TopMoverRecord]
+    metric_date: date | None
+    direction: str
 
 
 def _utc_now() -> datetime:
@@ -157,6 +172,48 @@ def list_computed_metrics(
     )
     total = db.execute(count_query).scalar_one()
     return MetricHistoryResult(ticker=ticker, items=items, total=total)
+
+
+def list_top_movers(
+    db: Session,
+    *,
+    metric_date: date | None = None,
+    direction: str = "gainers",
+    limit: int = 10,
+) -> TopMoversResult:
+    resolved_date = metric_date
+    if resolved_date is None:
+        resolved_date = db.execute(
+            select(ComputedMetric.metric_date).order_by(desc(ComputedMetric.metric_date))
+        ).scalar_one_or_none()
+    if resolved_date is None:
+        return TopMoversResult(items=[], metric_date=None, direction=direction)
+
+    order_column = desc(ComputedMetric.daily_return) if direction == "gainers" else ComputedMetric.daily_return
+    rows = db.execute(
+        select(
+            Ticker.symbol,
+            ComputedMetric.metric_date,
+            ComputedMetric.daily_return,
+            ComputedMetric.volume_ratio_20d,
+        )
+        .join(ComputedMetric, ComputedMetric.ticker_id == Ticker.id)
+        .where(ComputedMetric.metric_date == resolved_date)
+        .where(ComputedMetric.daily_return.is_not(None))
+        .order_by(order_column)
+        .limit(limit)
+    ).all()
+
+    items = [
+        TopMoverRecord(
+            symbol=row[0],
+            metric_date=row[1],
+            daily_return=row[2],
+            volume_ratio_20d=row[3],
+        )
+        for row in rows
+    ]
+    return TopMoversResult(items=items, metric_date=resolved_date, direction=direction)
 
 
 def upsert_historical_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> PriceLoadResult:

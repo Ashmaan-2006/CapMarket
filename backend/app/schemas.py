@@ -156,6 +156,14 @@ class TopMoverRead(BaseModel):
     close: Decimal | None = None
 
 
+class TopMoversRead(BaseModel):
+    items: list[TopMoverRead]
+    metric_date: date | None
+    direction: Literal["gainers", "losers"]
+    limit: int
+    count: int
+
+
 class ReportGenerateRequest(BaseModel):
     symbol: Symbol = Field(min_length=1, max_length=16)
     report_date: date | None = None
