@@ -138,6 +138,10 @@ Important values:
 
 See [docs/architecture.md](docs/architecture.md) for the schema, relationships, indexes, and performance notes.
 
+## Operations
+
+See [docs/runbook.md](docs/runbook.md) for local setup, migration, ETL, report generation, testing, and troubleshooting commands.
+
 ## Quality Gates
 
 CI runs on pushes and pull requests to validate the production-critical paths:
