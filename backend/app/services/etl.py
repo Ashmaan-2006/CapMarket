@@ -12,6 +12,7 @@ from app.core.config import Settings
 from app.models import ComputedMetric, EtlJob, EtlStatus, HistoricalPrice, Ticker
 from app.services.analytics import compute_metrics
 from app.services.market_data import MarketDataRequest, get_market_data_provider
+from app.services.transforms import clean_price_history
 
 logger = logging.getLogger(__name__)
 
@@ -125,23 +126,6 @@ def _mark_job_failed(
     db.commit()
     db.refresh(persisted_job)
     return persisted_job
-
-
-def _clean_prices(frame: pd.DataFrame) -> pd.DataFrame:
-    required = ["price_date", "open", "high", "low", "close", "volume", "symbol", "source"]
-    missing = set(required).difference(frame.columns)
-    if missing:
-        raise ValueError(f"Missing required columns: {sorted(missing)}")
-
-    cleaned = frame.copy()
-    cleaned["price_date"] = pd.to_datetime(cleaned["price_date"]).dt.date
-    for column in ["open", "high", "low", "close", "adjusted_close"]:
-        cleaned[column] = pd.to_numeric(cleaned[column], errors="coerce")
-    cleaned["volume"] = pd.to_numeric(cleaned["volume"], errors="coerce").fillna(0).astype(int)
-    cleaned = cleaned.dropna(subset=["open", "high", "low", "close"])
-    cleaned = cleaned[cleaned["volume"] >= 0]
-    cleaned = cleaned.drop_duplicates(subset=["symbol", "price_date", "source"])
-    return cleaned.sort_values(["symbol", "price_date"])
 
 
 def _decimal(value: object) -> Decimal | None:
@@ -269,7 +253,7 @@ async def run_market_data_etl(
                     MarketDataRequest(symbol=symbol, start_date=start_date, end_date=end_date)
                 )
                 raw_prices = result.rows
-                prices = _clean_prices(raw_prices)
+                prices = clean_price_history(raw_prices)
                 rows_extracted += len(prices)
                 ticker = _upsert_ticker(db, symbol)
                 rows_loaded += _upsert_prices(db, ticker, prices)
