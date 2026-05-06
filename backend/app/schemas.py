@@ -187,3 +187,12 @@ class AiReportRead(BaseModel):
     metrics_snapshot: dict[str, Any]
     model: str
     created_at: datetime
+
+
+class AiReportsRead(BaseModel):
+    symbol: str
+    items: list[AiReportRead]
+    limit: int
+    offset: int
+    count: int
+    total: int

@@ -1,21 +1,23 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import desc, select, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db import get_db
 from app.errors import not_found, service_unavailable, validation_failed
-from app.models import AiReport, ComputedMetric, EtlJob, Ticker
+from app.models import AiReport, EtlJob, Ticker
 from app.repositories.market_data import (
     list_computed_metrics,
     list_historical_prices,
     list_tickers as list_ticker_records,
     list_top_movers,
 )
+from app.repositories.reports import list_ai_reports
 from app.schemas import (
     AiReportRead,
+    AiReportsRead,
     MarketDataRead,
     EtlJobRead,
     EtlRunRequest,
@@ -43,6 +45,22 @@ def _normalize_symbol_param(value: str) -> str:
         return normalize_symbol(value)
     except ValueError as exc:
         raise validation_failed(str(exc)) from exc
+
+
+def _report_to_read(report: AiReport, symbol: str) -> AiReportRead:
+    return AiReportRead(
+        id=report.id,
+        symbol=symbol,
+        report_date=report.report_date,
+        report_type=report.report_type,
+        summary=report.summary,
+        trend_insights=report.trend_insights,
+        anomaly_explanations=report.anomaly_explanations,
+        risk_notes=report.risk_notes,
+        metrics_snapshot=report.metrics_snapshot,
+        model=report.model,
+        created_at=report.created_at,
+    )
 
 
 @router.get("/health", response_model=HealthRead)
@@ -213,35 +231,29 @@ def get_etl_status(
     )
 
 
-@router.get("/reports/{symbol}", response_model=list[AiReportRead])
-def get_reports(symbol: str, db: Session = Depends(get_db), limit: int = Query(default=10, ge=1, le=50)) -> list[AiReportRead]:
+@router.get("/reports/{symbol}", response_model=AiReportsRead)
+def get_reports(
+    symbol: str,
+    db: Session = Depends(get_db),
+    limit: int = Query(default=10, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+) -> AiReportsRead:
     normalized_symbol = _normalize_symbol_param(symbol)
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == normalized_symbol)).scalar_one_or_none()
-    if ticker is None:
+    result = list_ai_reports(db, symbol=normalized_symbol, limit=limit, offset=offset)
+    if result.ticker is None:
         raise not_found("Ticker", normalized_symbol)
 
-    reports = db.execute(
-        select(AiReport).where(AiReport.ticker_id == ticker.id).order_by(desc(AiReport.created_at)).limit(limit)
-    ).scalars()
-    return [
-        AiReportRead(
-            id=report.id,
-            symbol=ticker.symbol,
-            report_date=report.report_date,
-            report_type=report.report_type,
-            summary=report.summary,
-            trend_insights=report.trend_insights,
-            anomaly_explanations=report.anomaly_explanations,
-            risk_notes=report.risk_notes,
-            metrics_snapshot=report.metrics_snapshot,
-            model=report.model,
-            created_at=report.created_at,
-        )
-        for report in reports
-    ]
+    return AiReportsRead(
+        symbol=normalized_symbol,
+        items=[_report_to_read(report, result.ticker.symbol) for report in result.items],
+        limit=limit,
+        offset=offset,
+        count=len(result.items),
+        total=result.total,
+    )
 
 
-@router.post("/reports/generate", response_model=AiReportRead)
+@router.post("/reports/generate", response_model=AiReportRead, status_code=201)
 def create_report(
     payload: ReportGenerateRequest,
     db: Session = Depends(get_db),
@@ -253,16 +265,6 @@ def create_report(
         raise not_found("Report input", str(exc)) from exc
 
     ticker = db.get(Ticker, report.ticker_id)
-    return AiReportRead(
-        id=report.id,
-        symbol=ticker.symbol,
-        report_date=report.report_date,
-        report_type=report.report_type,
-        summary=report.summary,
-        trend_insights=report.trend_insights,
-        anomaly_explanations=report.anomaly_explanations,
-        risk_notes=report.risk_notes,
-        metrics_snapshot=report.metrics_snapshot,
-        model=report.model,
-        created_at=report.created_at,
-    )
+    if ticker is None:
+        raise not_found("Ticker", payload.symbol)
+    return _report_to_read(report, ticker.symbol)

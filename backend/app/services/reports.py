@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings
 from app.models import AiReport, ComputedMetric, HistoricalPrice, Ticker
+from app.repositories.market_data import get_ticker_by_symbol
+from app.repositories.reports import create_ai_report
 
 
 class AnalystReportOutput(BaseModel):
@@ -165,13 +167,16 @@ def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -
 
 def generate_report(db: Session, settings: Settings, symbol: str, report_date: date | None, report_type: str) -> AiReport:
     snapshot = build_metrics_snapshot(db, symbol, report_date)
-    ticker = db.execute(select(Ticker).where(Ticker.symbol == symbol.upper())).scalar_one()
+    ticker = get_ticker_by_symbol(db, symbol)
+    if ticker is None:
+        raise ValueError(f"Ticker {symbol.upper()} not found")
     prompt_payload = snapshot.to_prompt_payload()
     provider_result = get_report_provider(settings).generate(snapshot)
     output = provider_result.output
 
-    report = AiReport(
-        ticker_id=ticker.id,
+    return create_ai_report(
+        db,
+        ticker=ticker,
         report_date=snapshot.report_date,
         report_type=report_type,
         summary=output.summary,
@@ -181,7 +186,3 @@ def generate_report(db: Session, settings: Settings, symbol: str, report_date: d
         metrics_snapshot=prompt_payload,
         model=provider_result.model,
     )
-    db.add(report)
-    db.commit()
-    db.refresh(report)
-    return report

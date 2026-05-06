@@ -75,6 +75,11 @@ OpenAI/Gemini Report Generation
 - `GET /reports/{symbol}`
 - `POST /reports/generate`
 
+Report endpoints use the same production API conventions as market data:
+
+- `GET /reports/{symbol}` returns `{ symbol, items, limit, offset, count, total }`.
+- `POST /reports/generate` creates a stored report from computed metrics and returns `201 Created`.
+
 ## Local Development
 
 1. Copy environment values:

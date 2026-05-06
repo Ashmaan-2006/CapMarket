@@ -93,6 +93,10 @@ type TopMoversResponse = {
   count: number;
 };
 
+type ReportsResponse = PaginatedResponse<AiReport> & {
+  symbol: string;
+};
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -136,7 +140,10 @@ export const api = {
     const response = await request<TopMoversResponse>(`/top-movers?direction=${direction}`);
     return response.items;
   },
-  reports: (symbol: string) => request<AiReport[]>(`/reports/${symbol}`),
+  reports: async (symbol: string) => {
+    const response = await request<ReportsResponse>(`/reports/${symbol}`);
+    return response.items;
+  },
   generateReport: (symbol: string) =>
     request<AiReport>("/reports/generate", {
       method: "POST",
