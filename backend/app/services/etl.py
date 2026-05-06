@@ -1,6 +1,5 @@
 import logging
 from datetime import UTC, date, datetime
-from decimal import Decimal
 from typing import Any
 
 import pandas as pd
@@ -9,7 +8,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.models import ComputedMetric, EtlJob, EtlStatus, HistoricalPrice, Ticker
+from app.models import ComputedMetric, EtlJob, EtlStatus, Ticker
+from app.repositories.market_data import load_ticker_prices
 from app.services.analytics import compute_metrics
 from app.services.market_data import MarketDataRequest, get_market_data_provider
 from app.services.transforms import clean_price_history
@@ -128,57 +128,6 @@ def _mark_job_failed(
     return persisted_job
 
 
-def _decimal(value: object) -> Decimal | None:
-    if value is None or pd.isna(value):
-        return None
-    return Decimal(str(value))
-
-
-def _upsert_ticker(db: Session, symbol: str) -> Ticker:
-    stmt = insert(Ticker).values(symbol=symbol, name=symbol, asset_type="equity")
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Ticker.symbol],
-        set_={"updated_at": _utc_now(), "is_active": True},
-    ).returning(Ticker.id)
-    ticker_id = db.execute(stmt).scalar_one()
-    return db.get(Ticker, ticker_id)
-
-
-def _upsert_prices(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
-    rows = [
-        {
-            "ticker_id": ticker.id,
-            "price_date": row.price_date,
-            "open": _decimal(row.open),
-            "high": _decimal(row.high),
-            "low": _decimal(row.low),
-            "close": _decimal(row.close),
-            "adjusted_close": _decimal(row.adjusted_close),
-            "volume": int(row.volume),
-            "source": row.source,
-        }
-        for row in prices.itertuples(index=False)
-    ]
-    if not rows:
-        return 0
-
-    stmt = insert(HistoricalPrice).values(rows)
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_price_ticker_date_source",
-        set_={
-            "open": stmt.excluded.open,
-            "high": stmt.excluded.high,
-            "low": stmt.excluded.low,
-            "close": stmt.excluded.close,
-            "adjusted_close": stmt.excluded.adjusted_close,
-            "volume": stmt.excluded.volume,
-            "updated_at": _utc_now(),
-        },
-    )
-    db.execute(stmt)
-    return len(rows)
-
-
 def _upsert_metrics(db: Session, ticker: Ticker, prices: pd.DataFrame) -> int:
     metrics = compute_metrics(prices)
     rows = [
@@ -255,9 +204,9 @@ async def run_market_data_etl(
                 raw_prices = result.rows
                 prices = clean_price_history(raw_prices)
                 rows_extracted += len(prices)
-                ticker = _upsert_ticker(db, symbol)
-                rows_loaded += _upsert_prices(db, ticker, prices)
-                _upsert_metrics(db, ticker, prices)
+                load_result = load_ticker_prices(db, symbol, prices)
+                rows_loaded += load_result.rows_submitted
+                _upsert_metrics(db, load_result.ticker, prices)
                 completed_symbols.append(symbol)
                 _update_job_progress(
                     db,
