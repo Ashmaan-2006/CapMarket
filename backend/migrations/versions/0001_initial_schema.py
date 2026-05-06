@@ -26,6 +26,12 @@ def upgrade() -> None:
         sa.Column("is_active", sa.Boolean(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.CheckConstraint("symbol = upper(symbol)", name="ck_tickers_symbol_uppercase"),
+        sa.CheckConstraint(
+            "asset_type in ('equity', 'etf', 'index', 'fx', 'crypto')",
+            name="ck_tickers_asset_type",
+        ),
+        sa.CheckConstraint("currency = upper(currency)", name="ck_tickers_currency_uppercase"),
         sa.UniqueConstraint("symbol"),
     )
     op.create_index("ix_tickers_symbol", "tickers", ["symbol"])
@@ -44,6 +50,12 @@ def upgrade() -> None:
         sa.Column("source", sa.String(length=32), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.CheckConstraint("high >= low", name="ck_prices_high_gte_low"),
+        sa.CheckConstraint(
+            "open >= 0 and high >= 0 and low >= 0 and close >= 0",
+            name="ck_prices_non_negative_ohlc",
+        ),
+        sa.CheckConstraint("volume >= 0", name="ck_prices_non_negative_volume"),
         sa.UniqueConstraint("ticker_id", "price_date", "source", name="uq_price_ticker_date_source"),
     )
     op.create_index("ix_prices_ticker_date", "historical_prices", ["ticker_id", "price_date"])
@@ -65,6 +77,18 @@ def upgrade() -> None:
         sa.Column("volume_ratio_20d", sa.Numeric(18, 8), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.CheckConstraint("daily_return is null or daily_return > -1", name="ck_metrics_daily_return_floor"),
+        sa.CheckConstraint("weekly_return is null or weekly_return > -1", name="ck_metrics_weekly_return_floor"),
+        sa.CheckConstraint("monthly_return is null or monthly_return > -1", name="ck_metrics_monthly_return_floor"),
+        sa.CheckConstraint(
+            "volatility_20d is null or volatility_20d >= 0",
+            name="ck_metrics_non_negative_volatility",
+        ),
+        sa.CheckConstraint(
+            "volume_ratio_20d is null or volume_ratio_20d >= 0",
+            name="ck_metrics_non_negative_volume_ratio",
+        ),
+        sa.CheckConstraint("drawdown is null or drawdown <= 0", name="ck_metrics_drawdown_non_positive"),
         sa.UniqueConstraint("ticker_id", "metric_date", name="uq_metric_ticker_date"),
     )
     op.create_index("ix_metrics_ticker_date", "computed_metrics", ["ticker_id", "metric_date"])
@@ -99,15 +123,29 @@ def upgrade() -> None:
         sa.Column("error_message", sa.Text(), nullable=True),
         sa.Column("metadata", sa.JSON(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.CheckConstraint(
+            "status in ('pending', 'running', 'succeeded', 'failed')",
+            name="ck_etl_jobs_status",
+        ),
+        sa.CheckConstraint(
+            "job_type in ('market_data', 'metrics_backfill', 'report_backfill')",
+            name="ck_etl_jobs_job_type",
+        ),
+        sa.CheckConstraint("rows_extracted >= 0 and rows_loaded >= 0", name="ck_etl_jobs_non_negative_rows"),
     )
     op.create_index("ix_etl_jobs_started_status", "etl_jobs", ["started_at", "status"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_etl_jobs_started_status", table_name="etl_jobs")
     op.drop_table("etl_jobs")
+    op.drop_index("ix_reports_ticker_date", table_name="ai_reports")
     op.drop_table("ai_reports")
+    op.drop_index("ix_metrics_date_return", table_name="computed_metrics")
+    op.drop_index("ix_metrics_ticker_date", table_name="computed_metrics")
     op.drop_table("computed_metrics")
+    op.drop_index("ix_prices_date", table_name="historical_prices")
+    op.drop_index("ix_prices_ticker_date", table_name="historical_prices")
     op.drop_table("historical_prices")
     op.drop_index("ix_tickers_symbol", table_name="tickers")
     op.drop_table("tickers")
-
