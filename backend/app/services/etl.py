@@ -158,6 +158,7 @@ async def run_market_data_etl(
         settings.market_data_provider,
         timeout_seconds=settings.market_data_timeout_seconds,
         retries=settings.market_data_retries,
+        stooq_api_key=settings.stooq_api_key,
     )
     job = _create_job(
         db,

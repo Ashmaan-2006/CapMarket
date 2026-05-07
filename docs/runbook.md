@@ -172,6 +172,18 @@ Confirm the symbol is supported by the configured provider and the requested dat
 curl "http://localhost:8000/etl/status?limit=5"
 ```
 
+If Stooq returns an API-key message, either set:
+
+```text
+STOOQ_API_KEY=your_stooq_key
+```
+
+or use the deterministic local provider:
+
+```text
+MARKET_DATA_PROVIDER=fixture
+```
+
 ### Frontend Cannot Reach Backend
 
 Confirm:
@@ -186,4 +198,3 @@ Then restart the frontend container because Next.js reads public environment val
 ### Report Generation Returns 404
 
 Reports require stored computed metrics. Run ETL for the symbol first, then call `POST /reports/generate`.
-

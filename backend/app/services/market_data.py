@@ -2,6 +2,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import date
 from io import StringIO
+from urllib.parse import urlencode
 
 import httpx
 import pandas as pd
@@ -48,14 +49,23 @@ class MarketDataProvider:
 class StooqProvider(MarketDataProvider):
     source = "stooq"
 
-    def __init__(self, timeout_seconds: float = 30.0, retries: int = 2) -> None:
+    def __init__(
+        self,
+        timeout_seconds: float = 30.0,
+        retries: int = 2,
+        api_key: str | None = None,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self.retries = retries
+        self.api_key = api_key
 
     async def fetch_history(self, request: MarketDataRequest) -> MarketDataResult:
         symbol = request.normalized_symbol
         stooq_symbol = f"{symbol.lower()}.us"
-        url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+        params = {"s": stooq_symbol, "i": "d"}
+        if self.api_key:
+            params["apikey"] = self.api_key
+        url = f"https://stooq.com/q/d/l/?{urlencode(params)}"
 
         response_text = await self._get_with_retries(url)
         rows = self._parse_csv(symbol, response_text, request.start_date, request.end_date)
@@ -88,7 +98,16 @@ class StooqProvider(MarketDataProvider):
         start_date: date | None,
         end_date: date | None,
     ) -> pd.DataFrame:
-        frame = pd.read_csv(StringIO(response_text))
+        if "Get your apikey" in response_text:
+            raise MarketDataProviderError(
+                "Stooq now requires an API key for CSV downloads. Set STOOQ_API_KEY "
+                "or use MARKET_DATA_PROVIDER=fixture for local demos."
+            )
+
+        try:
+            frame = pd.read_csv(StringIO(response_text))
+        except pd.errors.ParserError as exc:
+            raise MarketDataProviderError("Market data provider returned non-CSV content") from exc
         if frame.empty or "Date" not in frame.columns:
             raise MarketDataNotFoundError(f"No market data returned for {symbol}")
 
@@ -147,9 +166,14 @@ def get_market_data_provider(
     name: str,
     timeout_seconds: float = 30.0,
     retries: int = 2,
+    stooq_api_key: str | None = None,
 ) -> MarketDataProvider:
     if name.lower() == "stooq":
-        return StooqProvider(timeout_seconds=timeout_seconds, retries=retries)
+        return StooqProvider(
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+            api_key=stooq_api_key,
+        )
     if name.lower() == "fixture":
         return FixtureProvider()
     raise ValueError(f"Unsupported market data provider: {name}")

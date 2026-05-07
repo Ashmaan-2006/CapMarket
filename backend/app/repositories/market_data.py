@@ -184,7 +184,9 @@ def list_top_movers(
     resolved_date = metric_date
     if resolved_date is None:
         resolved_date = db.execute(
-            select(ComputedMetric.metric_date).order_by(desc(ComputedMetric.metric_date))
+            select(ComputedMetric.metric_date)
+            .order_by(desc(ComputedMetric.metric_date))
+            .limit(1)
         ).scalar_one_or_none()
     if resolved_date is None:
         return TopMoversResult(items=[], metric_date=None, direction=direction)

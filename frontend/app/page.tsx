@@ -195,6 +195,7 @@ export default function DashboardPage() {
                 value={tickerQuery}
                 onChange={(event) => setTickerQuery(event.target.value)}
                 aria-label="Ticker symbol"
+                suppressHydrationWarning
               />
               <datalist id="ticker-symbols">
                 {knownSymbols.map((symbol) => (
