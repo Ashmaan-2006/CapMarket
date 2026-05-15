@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from app.core.config import Settings
 from app.services.reports import (
@@ -6,6 +7,7 @@ from app.services.reports import (
     OpenAiReportProvider,
     ReportMetricSnapshot,
     _build_signals,
+    build_metrics_snapshot,
     get_report_provider,
 )
 
@@ -91,3 +93,47 @@ def test_get_report_provider_selects_configured_provider() -> None:
 
     assert isinstance(fallback, LocalFallbackReportProvider)
     assert isinstance(configured, OpenAiReportProvider)
+
+
+def test_build_metrics_snapshot_limits_latest_metric_and_price_queries() -> None:
+    executed_statements = []
+
+    class FakeResult:
+        def __init__(self, value) -> None:
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeSession:
+        def execute(self, statement):
+            executed_statements.append(statement)
+            if len(executed_statements) == 1:
+                return FakeResult(type("TickerRecord", (), {"id": 1, "symbol": "AAPL"})())
+            if len(executed_statements) == 2:
+                return FakeResult(
+                    type(
+                        "MetricRecord",
+                        (),
+                        {
+                            "metric_date": date(2024, 1, 2),
+                            "daily_return": Decimal("0.05"),
+                            "weekly_return": Decimal("0.04"),
+                            "monthly_return": None,
+                            "volatility_20d": Decimal("0.01"),
+                            "sma_20": Decimal("100"),
+                            "sma_50": Decimal("95"),
+                            "ema_20": Decimal("99"),
+                            "drawdown": Decimal("-0.02"),
+                            "volume_ratio_20d": Decimal("2.2"),
+                        },
+                    )()
+                )
+            return FakeResult(type("PriceRecord", (), {"close": Decimal("105"), "volume": 1000})())
+
+    snapshot = build_metrics_snapshot(FakeSession(), "AAPL", None)
+
+    assert snapshot.symbol == "AAPL"
+    assert snapshot.latest_price == 105.0
+    assert executed_statements[1]._limit_clause.value == 1
+    assert executed_statements[2]._limit_clause.value == 1

@@ -137,7 +137,9 @@ def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -
     metric_query = select(ComputedMetric).where(ComputedMetric.ticker_id == ticker.id)
     if report_date:
         metric_query = metric_query.where(ComputedMetric.metric_date <= report_date)
-    metric = db.execute(metric_query.order_by(desc(ComputedMetric.metric_date))).scalar_one_or_none()
+    metric = db.execute(
+        metric_query.order_by(desc(ComputedMetric.metric_date)).limit(1)
+    ).scalar_one_or_none()
     if metric is None:
         raise ValueError(f"No computed metrics found for {ticker.symbol}")
 
@@ -145,6 +147,7 @@ def build_metrics_snapshot(db: Session, symbol: str, report_date: date | None) -
         select(HistoricalPrice)
         .where(HistoricalPrice.ticker_id == ticker.id, HistoricalPrice.price_date <= metric.metric_date)
         .order_by(desc(HistoricalPrice.price_date))
+        .limit(1)
     ).scalar_one_or_none()
 
     snapshot = ReportMetricSnapshot(
