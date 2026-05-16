@@ -155,9 +155,12 @@ export default function DashboardPage() {
     setActionLoading("etl");
     setError(null);
     try {
-      const job = await api.runEtl([selectedSymbol]);
+      const symbol = tickerQuery.trim().toUpperCase() || selectedSymbol;
+      setSelectedSymbol(symbol);
+      setTickerQuery(symbol);
+      const job = await api.runEtl([symbol]);
       setEtlJobs((current) => [job, ...current]);
-      await refreshDashboard(selectedSymbol);
+      await refreshDashboard(symbol);
     } catch (err) {
       setError(err instanceof Error ? err.message : "ETL failed");
     } finally {

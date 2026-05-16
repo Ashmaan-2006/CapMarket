@@ -71,6 +71,8 @@ curl -X POST http://localhost:8000/etl/run \
   -d '{"symbols":["AAPL","MSFT","SPY","TSLA"],"start_date":"2024-01-01"}'
 ```
 
+The dashboard can also run ETL for any typed ticker. With Stooq, plain symbols default to US listings, so `AAPL` maps to `aapl.us`. To request a provider-specific listing, include the suffix, for example `SHOP.TO` or `RY.TO`. Alpha Vantage uses plain exchange symbols such as `AAPL`, `MSFT`, and `TSLA`. The deterministic `fixture` provider accepts any valid symbol for local demos.
+
 Check ETL status:
 
 ```bash
@@ -182,6 +184,13 @@ or use the deterministic local provider:
 
 ```text
 MARKET_DATA_PROVIDER=fixture
+```
+
+To use Alpha Vantage instead, set the provider below. The implementation uses the free-tier `TIME_SERIES_DAILY` compact response for recent daily history.
+
+```text
+MARKET_DATA_PROVIDER=alpha_vantage
+ALPHA_VANTAGE_API_KEY=your_alpha_vantage_key
 ```
 
 ### Frontend Cannot Reach Backend

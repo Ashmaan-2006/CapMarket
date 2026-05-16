@@ -203,6 +203,8 @@ Response:
 
 Starts an ETL job for one or more symbols. The endpoint returns `202 Accepted`.
 
+Symbols are normalized to uppercase. With the Stooq provider, plain symbols default to US listings; provider-specific symbols can include a suffix such as `SHOP.TO`. The fixture provider accepts any valid symbol for deterministic local demo data.
+
 Request:
 
 ```json
@@ -322,4 +324,3 @@ Response:
 - `404 Not Found`: requested ticker or report input was unavailable
 - `422 Unprocessable Entity`: invalid symbol, date range, pagination, or request body
 - `503 Service Unavailable`: readiness check failed because the database is unavailable
-

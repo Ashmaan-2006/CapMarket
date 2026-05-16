@@ -82,6 +82,7 @@ Report endpoints use the same production API conventions as market data:
 - `POST /reports/generate` creates a stored report from computed metrics and returns `201 Created`.
 
 See [docs/api-contract.md](docs/api-contract.md) for endpoint parameters, response envelopes, examples, and status codes.
+The dashboard can run ETL for any valid typed symbol; provider-specific symbols such as `SHOP.TO` are supported when the configured market data provider supports them.
 
 ## Local Development
 
@@ -133,6 +134,7 @@ Important values:
 - `MARKET_DATA_TIMEOUT_SECONDS`
 - `MARKET_DATA_RETRIES`
 - `STOOQ_API_KEY`
+- `ALPHA_VANTAGE_API_KEY`
 - `OPENAI_API_KEY`
 - `AI_PROVIDER`
 - `NEXT_PUBLIC_API_BASE_URL`

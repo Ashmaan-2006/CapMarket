@@ -4,14 +4,14 @@ WORKDIR /app
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-
-RUN pip install --no-cache-dir --upgrade pip
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+ENV PIP_DEFAULT_TIMEOUT=120
 
 COPY pyproject.toml ./
 COPY alembic.ini ./
 COPY app ./app
 COPY migrations ./migrations
-RUN pip install --no-cache-dir -e .
+RUN python -m pip install --no-cache-dir -e .
 
 EXPOSE 8000
 
